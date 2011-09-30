@@ -1,0 +1,1083 @@
+#!@PYTHON@
+
+# Copyright (c) 2010 Kyle Lanclos <grappy@lanclos.org>,
+# 2004 Mattias Amnefelt <mattiasa@stacken.kth.se>.
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 
+# 3. The name of the Author may not be used to endorse or promote
+#    products derived from this software without specific prior written
+#    permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+#
+
+# This software is based on greylist-python which has been placed in the
+# public domain by its author Vsevolod Sipakov <versus@megalink.ru>
+
+#
+# $Id: grappy.in,v 1.31 2010/10/02 23:27:48 lanclos Exp $
+#
+
+# Required modules.
+
+import os
+import Queue
+import SocketServer
+import sys
+import syslog
+import threading
+import time
+import traceback
+
+#
+# #
+# Default configuration.
+# #
+#
+
+CONFIG = '@sysconfdir@/grappy.conf'
+
+# Default values for configurable variables. See the grappy.conf file
+# for details.
+
+GREYLIST_DELAY = 300
+HEADERS = True
+GREY_HEADER      = "X-Greylist: sender %s passed by greylist match"
+WHITE_ADD_HEADER = "X-Greylist: sender %s whitelisted after %d seconds"
+WHITE_HEADER     = "X-Greylist: sender %s whitelisted"
+ERROR_HEADER     = "X-Greylist: internal error bypassed, message accepted"
+LIGHTGREY = False
+MUNGE_SENDER = True
+AUTO_WHITELIST = True
+GREYLIST_MESSAGE = "Thank you for your interest, please try again later"
+LEARNING_MODE = False
+PASS_ON_ERROR = True
+DBHOST = 'localhost'
+DBNAME = 'grappy'
+DBUSER = 'grappy'
+DBPASS = 'something'
+DBTYPE = 'postgresql'
+DBTIMEOUT = 2
+ADDRESS = '127.0.0.1'
+PORT = 10026
+PID_FILE = '@PID@'
+DEBUG = False
+
+if os.path.isfile (CONFIG):
+	pass
+else:
+	raise ValueError, "cannot find grappy config file: %s" % (CONFIG)
+
+#
+# #
+# Read in the config file.
+# #
+#
+
+config = open (CONFIG, 'r')
+config = config.read ()
+config = config.split ('\n')
+
+for line in config:
+	# Strip out comments.
+	line = line.split ('#', 1)[0]
+
+	# Eliminate whitespace.
+	line = line.strip ()
+
+	# No further processing on blank lines.
+	if line == '':
+		continue
+
+	variable, value = line.split ('=', 1)
+
+	variable = variable.strip ()
+	value    = value.strip ()
+
+	if variable == 'GREYLIST_DELAY':
+		GREYLIST_DELAY = int (value)
+
+	elif variable == 'HEADERS':
+		if value == 'True':
+			HEADERS = True
+		elif value == 'False':
+			HEADERS = False
+		else:
+			raise ValueError, "HEADERS in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'GREY_HEADER':
+		GREY_HEADER = value
+
+	elif variable == 'WHITE_ADD_HEADER':
+		WHITE_ADD_HEADER = value
+
+	elif variable == 'WHITE_HEADER':
+		WHITE_HEADER = value
+
+	elif variable == 'ERROR_HEADER':
+		ERROR_HEADER = value
+
+	elif variable == 'MUNGE_SENDER':
+		if value == 'True':
+			MUNGE_SENDER = True
+		elif value == 'False':
+			MUNGE_SENDER = False
+		else:
+			raise ValueError, "MUNGE_SENDER in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'AUTO_WHITELIST':
+		if value == 'True':
+			AUTO_WHITELIST = True
+		elif value == 'False':
+			AUTO_WHITELIST = False
+		else:
+			raise ValueError, "AUTO_WHITELIST in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'LIGHTGREY':
+		if value == 'True':
+			LIGHTGREY = True
+		elif value == 'False':
+			LIGHTGREY = False
+		else:
+			raise ValueError, "LIGHTGREY in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'GREYLIST_MESSAGE':
+		GREYLIST_MESSAGE = value
+
+	elif variable == 'LEARNING_MODE':
+		if value == 'True':
+			LEARNING_MODE = True
+		elif value == 'False':
+			LEARNING_MODE = False
+		else:
+			raise ValueError, "LEARNING_MODE in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'PASS_ON_ERROR':
+		if value == 'True':
+			PASS_ON_ERROR = True
+		elif value == 'False':
+			PASS_ON_ERROR = False
+		else:
+			raise ValueError, "PASS_ON_ERROR in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'DBHOST':
+		DBHOST = value
+
+	elif variable == 'DBNAME':
+		DBNAME = value
+
+	elif variable == 'DBUSER':
+		DBUSER = value
+
+	elif variable == 'DBPASS':
+		DBPASS = value
+
+	elif variable == 'DBTYPE':
+		DBTYPE = value
+
+	elif variable == 'DBTIMEOUT':
+		DBTIMEOUT = int (value)
+
+	elif variable == 'ADDRESS':
+		ADDRESS = value
+
+	elif variable == 'PORT':
+		PORT = int (value)
+
+	elif variable == 'PID_FILE':
+		PID_FILE = value
+
+	elif variable == 'DEBUG':
+		if value == 'True':
+			DEBUG = True
+		elif value == 'False':
+			DEBUG = False
+		else:
+			raise ValueError, "DEBUG in grappy.conf must be True or False, not '%s'" % (value)
+
+
+#
+# #
+# Having read in the config, import the database library.
+# #
+#
+
+DBTYPE = DBTYPE.lower ()
+
+if DBTYPE == 'postgresql':
+	import pgdb
+	connect = pgdb.connect
+	DatabaseError = pgdb.DatabaseError
+
+elif DBTYPE == 'mysql':
+	import MySQLdb
+	connect = MySQLdb.connect
+	DatabaseError = MySQLdb.DatabaseError
+
+else:
+	raise ValueError, "unrecognized value for DBTYPE: %s" % (DBTYPE)
+
+
+# Arbitrary global objects.
+
+CONNECTION_QUEUE = Queue.Queue ()
+
+#
+# #
+# Main execution.
+# #
+#
+
+def main ():
+	syslog.openlog('grappy['+str(os.getpid())+']',0,syslog.LOG_MAIL)
+	printLog ("Starting...")
+
+	if not DEBUG: 
+		daemonize (PID_FILE)
+
+	server = GrappyTCPServer ((ADDRESS, PORT), GreylistRequestHandler)
+
+	try:
+		server.serve_forever ()
+
+	except SystemExit:
+		printDebug ('Quitting on termination signal')
+	except KeyboardInterrupt:
+		printDebug ('Quitting on keyboard interrupt (ctrl-c)')
+	except:
+		syslogTraceback ()
+
+
+	# Attempt a graceful shutdown.
+
+	if hasattr (server, 'shutdown'):
+		server.shutdown ()
+
+	while True:
+		try:
+			connection = CONNECTION_QUEUE.get (block=False)
+		except Queue.Empty:
+			break
+
+		connection.close ()
+
+	# End of execution.
+
+
+def daemonize (pidfilename):
+	''' This forks the current process into a daemon.
+
+	    References:
+	    UNIX Programming FAQ
+	    1.7 How do I get my program to act like a daemon?
+	    http://www.erlenstar.demon.co.uk/unix/faq_2.html#SEC16
+	    Advanced Programming in the Unix Environment
+	    W. Richard Stevens, 1992, Addison-Wesley, ISBN 0-201-56317-7.
+
+	'''
+	# Do first fork.
+	try: 
+		pid = os.fork () 
+		if pid > 0:
+			# Exit first parent.
+			sys.exit(0)
+
+	except OSError, e: 
+		sys.stderr.write ("fork #1 failed: (%d) %s\n" % (e.errno, e.strerror))
+		sys.exit(1)
+
+	# Decouple from parent environment.
+	os.chdir ('/') 
+	os.umask (0) 
+	os.setsid () 
+
+	# Do second fork.
+	try: 
+		pid = os.fork() 
+		if pid > 0:
+			# Exit second parent.
+			sys.exit (0)
+
+	except OSError, e: 
+		sys.stderr.write ("fork #2 failed: (%d) %s\n" % (e.errno, e.strerror))
+		sys.exit(1)
+
+	# Now I am a daemon!
+
+	mypid = os.getpid()
+
+	pidfile = file (pidfilename, "w+")
+	pidfile.write ("%s\n" % mypid)
+	pidfile.close ()
+
+	# Redirect standard file descriptors.
+
+	stdin  = '/dev/null'
+	stdout = '/dev/null'
+	stderr = '/dev/null'
+
+	si = file (stdin, 'r')
+	so = file (stdout, 'a+')
+	se = file (stderr, 'a+', 0)
+
+	os.dup2 (si.fileno (), sys.stdin.fileno ())
+	os.dup2 (so.fileno (), sys.stdout.fileno ())
+	os.dup2 (se.fileno (), sys.stderr.fileno ())
+
+
+def syslogTraceback (exception=None):
+
+	if exception == None:
+		exception = sys.exc_info ()
+
+	lines = traceback.format_exception (*exception)
+
+	for line in lines:
+		printLog (line)
+
+
+def printLog (message):
+	if DEBUG:
+		printDebug (message)
+	else:
+		syslog.syslog (message)
+
+
+def printDebug (message):
+	if DEBUG:
+		now = int (time.time ())
+		print '[%d] %s' % (now, message)
+
+
+def lightAddress (address):
+	''' Return the first three octets of an IP address.
+	    If the address is IPv6, do nothing.
+	'''
+
+	if address.find (':') != -1:
+		# IPv6.
+		return address
+
+	# The split/join operation is roughly 50% faster
+	# than using a regular expression.
+
+	octets = address.split ('.')
+	return '.'.join (octets[:-1])
+
+
+def timeout (delay, function, *args, **kwargs):
+	''' Invoke the designated function, returning its result if
+	    successful. If the function raises an exception, the
+	    exception will be raised.
+
+	    If the function does not finish running after 'delay'
+	    seconds, a TimeoutError will be raised.
+	    
+	    Note that any function that *does* time out will remain
+	    running in its own thread until it terminates of its own
+	    free will. There is no reasonable way to safely terminate
+	    an arbitrary thread from Python.
+	'''
+
+	timeout_thread = TimeoutThread (function, *args, **kwargs)
+
+	timeout_thread.start ()
+	timeout_thread.join (delay)
+
+	if timeout_thread.isAlive ():
+		# Wishful thinking:
+		# timeout_thread.terminate ()
+		raise TimeoutError, "function did not return after %d seconds" % (delay)
+
+	if timeout_thread.exception != None:
+		syslogTraceback (timeout_thread.exception)
+		raise timeout_thread.exception[1]
+
+
+	# No exceptions to raise-- this indicates success.
+
+	return timeout_thread.result
+
+
+class TimeoutError (IOError):
+	pass
+
+class TimeoutThread (threading.Thread):
+	''' Based on the example here:
+
+	    http://code.activestate.com/recipes/473878/
+	'''
+
+	def __init__ (self, function, *args, **kwargs):
+		threading.Thread.__init__ (self)
+
+		self.result    = None
+		self.exception = None
+		self.traceback = None
+
+		self.function = function
+		self.args     = args
+		self.kwargs   = kwargs
+
+
+	def run (self):
+
+		try:
+			self.result = self.function (*self.args, **self.kwargs)
+		except:
+			self.exception = sys.exc_info ()
+
+
+class SQLHandler:
+
+	def put (self, connection):
+
+		CONNECTION_QUEUE.put (connection)
+
+
+	def get (self):
+
+		try:
+			connection = CONNECTION_QUEUE.get (block=False)
+		except Queue.Empty:
+			connection = self.new ()
+
+		return connection
+
+
+	def select (self, query):
+		connection = self.get ()
+		cursor = connection.cursor ()
+
+		cursor.execute (query)
+		results = cursor.fetchone ()
+
+		cursor.close ()
+		self.put (connection)
+
+		return results
+
+
+	def execute (self, query):
+		connection = self.get ()
+		cursor = connection.cursor ()
+
+		cursor.execute (query)
+		connection.commit ()
+
+		cursor.close ()
+		self.put (connection)
+
+
+	def new (self):
+		printDebug ("Creating new database connection")
+
+		# Set a timeout in case the database is offline.
+	
+		if DBTYPE == 'postgresql':
+			connection = timeout (DBTIMEOUT, connect, user=DBUSER,host=DBHOST,database=DBNAME,password=DBPASS)
+		else:
+			connection = timeout (DBTIMEOUT, connect, user=DBUSER,host=DBHOST,db=DBNAME,passwd=DBPASS)
+
+		return connection
+
+
+	def sanitize (self, value):
+		''' Remove all of the following, potentially unsafe
+		    characters from strings that will be inserted
+		    into a SQL database:
+
+		    # & ' / ; \ ^ { | } ~
+
+		    Likewise, remove all instances of '--'.
+		'''
+
+		# One could use a regular expression here, but because
+		# regular expressions are comparatively slow, this method
+		# is just as fast in the average case. It's also a whole
+		# lot more readable.
+
+		unwelcome = ('#', '&', "'", '/', ';', '\\',
+			     '^', '{', '|', '}', '~', '--')
+
+		for character in unwelcome:
+			value = value.replace (character, '')
+
+		return value
+
+
+class GreylistRequestHandler (SocketServer.StreamRequestHandler):
+
+	def __init__ (self, *args, **kwargs):
+		self.shutdown_flag = False
+		SocketServer.StreamRequestHandler.__init__ (self, *args, **kwargs)
+
+
+	def shutdown (self):
+		self.shutdown_flag = True
+		SocketServer.StreamRequestHandler.shutdown (self)
+
+
+	def decide (self):
+		''' Check to see whether a given triplet is whitelisted
+		    or greylisted. Returns the appropriate Postfix policy
+		    action, as well as the appropriate header.
+		'''
+
+		ip,sender,recipient = self.info.triplet ()
+
+		whitelisted = self.info.checkWhitelist ()
+
+		if whitelisted:
+			action = 'dunno'
+			try:
+				header = WHITE_HEADER % (ip)
+			except TypeError:
+				header = WHITE_HEADER
+
+		else:
+			# Check the greylist.
+
+			elapsed = self.info.checkGreylist ()
+
+			if elapsed < GREYLIST_DELAY:
+				action = "defer_if_permit %s" % (GREYLIST_MESSAGE)
+				header = None
+
+			elif AUTO_WHITELIST:
+				# The configured waiting period has elapsed,
+				# and automatic whitelisting is enabled.
+
+				action = 'dunno'
+
+				try:
+					header = WHITE_ADD_HEADER % (ip, elapsed)
+				except TypeError:
+					header = WHITE_ADD_HEADER
+
+			else:
+				# The configured waiting period has elapsed,
+				# and automatic whitelisting is not enabled.
+
+				action = 'dunno'
+
+				try:
+					header = GREY_HEADER % (ip)
+				except TypeError:
+					header = GREY_HEADER
+
+
+		# If a message has multiple recipients, the policy daemon
+		# is queried for each recipient. If this is a consective
+		# appraisal of the same message, do not prepend the header
+		# for every recipient, though there is no guarantee (but
+		# it is highly likely) that the header would be the same
+		# for each consecutive appraisal.
+
+		if self.info.multiple == True:
+			header = None
+
+		return ((action, header))
+
+
+	def handle (self):
+		printDebug ("MTA connected")
+		self.info = PolicyInfo ()
+
+		while (True):
+			if self.shutdown_flag:
+				break
+
+			line = self.rfile.readline ()
+
+			if line == '' or line == None:
+				printDebug ("MTA disconnected")
+				break
+
+			# There is a newline character at the end of each
+			# line provided by Postfix. The end of the content
+			# for a given message is marked by a line with no
+			# content, just a newline character.
+
+			# Thus, if we strip whitespace, the "moment of
+			# decision" is indicated by the empty string.
+
+			line = line.strip ()
+
+			if line != '':
+				self.info.parseLine (line)
+			else:
+				# Empty input line-- end of message metadata.
+				# Decision time.
+
+				try:	
+					action, header = self.decide ()
+
+				except:
+					printLog ("Internal processing error:")
+					syslogTraceback ()
+
+					if PASS_ON_ERROR:
+						action = 'dunno'
+						header = ERROR_HEADER
+					else:
+						action = 'defer_if_permit Message processing not available'
+						header = None
+
+
+				if LEARNING_MODE:
+					printDebug ('Action: dunno (LEARNING_MODE==True)')
+					action = 'dunno'
+					header = None
+				else:
+					printDebug ('Action: %s' % (action))
+
+				if HEADERS == True and header != None:
+					printDebug ("Header: %s" % (header))
+					action = "PREPEND %s\n" % (header)
+
+				self.wfile.write ("action=%s\n\n" % (action))
+
+				sys.stdout.flush ()
+				self.info.cleanup ()
+
+
+
+
+class PolicyInfo:
+
+	def __init__ (self):
+		self.multiple = False
+		self.instance = None
+		self.meta = {}
+		self.sql  = SQLHandler ()
+
+	def cleanup (self):
+		self.meta = {}
+
+	def triplet (self, lightip=LIGHTGREY):
+
+		# If we already created the triplet, return the
+		# cached value.
+
+		if self.meta.has_key ('grappy_triplet'):
+			return self.meta['grappy_triplet']
+
+		# Otherwise, construct a new triplet.
+
+		ip = ''
+		sender = ''
+		recipient = ''
+
+		if self.meta.has_key ('client_address'):
+			ip = self.meta['client_address']
+
+			if lightip:
+				ip = lightAddress (ip)
+
+		if self.meta.has_key ('sender'):
+			sender = self.meta['sender']
+
+		if self.meta.has_key ('recipient'):
+			recipient = self.meta['recipient']
+
+		if sender == '':
+			# There is frequently no sender defined when a mail
+			# transfer agent issues a bounce of some kind.
+
+			sender = 'nosendername@nosenderdomain'
+
+		elif sender.find ('@') == -1:
+			# Either the sender name or sender domain is missing.
+			# The only smtpd_access_policy field that might contain
+			# the sender name is the 'sender' field, so assume that
+			# we are missing the sender domain.
+
+			if self.meta.has_key ('client_name') and \
+			   self.meta['client_name'] != '':
+
+				domain = self.meta['client_name']
+
+			elif self.meta.has_key ('reverse_client_name') and \
+			     self.meta['reverse_client_name'] != '':
+
+				domain = self.meta['reverse_client_name']
+
+			elif self.meta.has_key ('helo_client_name') and \
+			     self.meta['helo_client_name'] != '':
+
+				domain = self.meta['helo_client_name']
+
+			else:
+				domain = 'nosenderdomain'
+
+			sender = "%s@%s" % (sender, domain)
+
+
+		if MUNGE_SENDER:
+			# Munge the sender to handle VERP formatting.
+			# Basically, toss anything after the first -
+			# or + character. This is an excessively simple
+			# approach, but it's not like the different
+			# services using these techniques have agreed
+			# on a common standard.
+
+			# Yes, this will potentially munge regular,
+			# non-VERP addresses as well. The assertion
+			# is that the additional munging does not
+			# impact the overall efficacy of the greylist
+			# function itself.
+
+			sendername,domain = sender.split ('@', 1)
+
+			minus = sendername.find ('-')
+			plus  = sendername.find ('+')
+
+			if minus == -1 and plus == -1:
+				# No VERP-ish activity here.
+				pass
+			elif plus == -1:
+				# There is a minus, but no plus.
+				sendername = sendername[:minus + 1]
+			elif minus == -1:
+				# There is a plus, but no minus.
+				sendername = sendername[:plus + 1]
+			else:
+				# There are both minus and plus characters
+				# in the left-hand-side of the sender address.
+				# Chop off everything after the first instance.
+
+				index = min (minus, plus)
+				sendername = sendername[:index + 1]
+
+			sender = '@'.join ((sendername, domain))
+
+		triplet = (ip, sender, recipient)
+
+		self.meta['grappy_triplet'] = triplet
+
+		return triplet
+
+
+	def parseLine (self, line):
+		''' Take a line looking like:
+
+		    sender=someone@somedomain.com
+
+		    ...and chop it into its keyword=value pairs.
+		    Insert the results into the self.meta dictionary.
+		'''
+
+		try:
+			keyword,value = line.split ('=', 1)
+
+		except ValueError:
+			printDebug ("junk at input: '%s'" % (line))
+			return
+
+		keyword = keyword.strip ()
+		keyword = keyword.lower ()
+		value   = value.strip ()
+
+		self.meta[keyword] = self.sql.sanitize (value)
+
+		# Keep track of the message instance, so that we
+		# only respond once with a header.
+
+		if keyword == 'instance':
+			if self.instance == value:
+				# Multiple recipients for the same message.
+				self.multiple = True
+			else:
+				# First triplet processed with this handler,
+				# or a new message instance.
+				self.instance = value
+				self.multiple = False
+
+		printDebug ("Meta: '%s': '%s'" % (keyword, value))
+
+
+	def checkWhitelist(self):
+		''' Returns True if the sending address is whitelisted,
+		    False otherwise.
+
+		    If there is a whitelist hit, update the 'last' field
+		    for that particular entry.
+		'''
+
+		ip,sender,recipient = self.triplet (lightip=False)
+
+		lightip	= lightAddress (ip)
+
+		k = """SELECT count(*) FROM whitelist
+			WHERE
+			ip IN ('%s', '%s')
+		    """ % (ip, lightip)
+
+		t = self.sql.select (k)
+
+		if t[0] > 0:
+			# There was at least one match. Record a hit on any
+			# relevant whitelist entries.
+
+			now = int (time.time ())
+
+			k = """ UPDATE whitelist
+				SET
+				last=%d
+				WHERE
+				ip IN ('%s', '%s')
+				AND
+				last < %d
+			    """ % (now, ip, lightip, now)
+
+			self.sql.execute (k)
+
+			printLog ("whitelist match: ip=%s" % (ip))
+			return True
+
+		# No whitelist matches.
+		return False
+
+
+	def createEntry(self):
+		''' Returns False if no greylist entry is created,
+		    True if one is created.
+		'''
+
+		created = True
+
+		ip,sender,recipient = self.triplet ()
+
+		query = """ SELECT COUNT(*) FROM greylist
+			    WHERE
+			    ip='%s'
+			    AND
+			    sender='%s'
+			    AND
+			    recipient='%s'
+			""" % (ip,sender,recipient)
+
+		t = self.sql.select (query)
+
+		if t[0] > 0:
+			# An entry already exists for this triplet.
+			created = False
+			return created
+
+		# Create a new entry.
+
+		now = int (time.time ())
+
+		query = """ INSERT INTO greylist
+			    (ip,sender,recipient,first,last,count)
+			    VALUES
+			    ('%s','%s','%s',%d,%d,%d)
+			""" % (ip,sender,recipient, now, now, 1)
+
+		# There is the possibility of a race condition here,
+		# in that another instance (or thread) may have just
+		# inserted a matching entry in the greylist table,
+		# even though we checked beforehand.
+
+		try:
+			self.sql.execute (query)
+		except DatabaseError:
+			created = False
+	
+		return created
+
+
+	def firstSeen (self):
+		''' Returns a UNIX timestamp (seconds since 1970) for the
+		    'first' time a given entry was seen.
+
+		    Returns 'None' if there is no first time. This should
+		    only ever happen if there is no entry in the database
+		    for that particular triplet.
+		'''
+
+		ip,sender,recipient = self.triplet ()
+
+		k = """ SELECT first FROM greylist
+			WHERE
+			ip='%s'
+			AND
+			sender='%s'
+			AND
+			recipient='%s'
+		    """ % (ip,sender,recipient)
+
+		t = self.sql.select (k)
+
+		if t:
+			return t[0]
+
+		return None
+
+
+	def checkGreylist (self):
+
+		ip,sender,recipient = self.triplet ()
+
+		# If this is the first time we've seen this triplet,
+		# self.createEntry () performs all the necessary
+		# database updates.
+
+		created = self.createEntry ()
+
+		if created == True:
+			# A new entry was created.
+			elapsed = 0
+			printLog ("greylist add: ip=%s sender=%s recipient=%s" % (ip,sender,recipient))
+		else:
+			# A greylist entry matching the triplet already existed.
+
+   			first = self.firstSeen ()
+			now   = int (time.time ())
+
+			elapsed = now - first
+
+			if elapsed >= GREYLIST_DELAY and AUTO_WHITELIST:
+				# The GREYLIST_DELAY period has elapsed,
+				# and this is (at least) the second time
+				# we've seen this triplet. Add it to the
+				# whitelist.
+
+				self.greyToWhite ()
+				printLog ("whitelist add: ip=%s" % (ip))
+
+			else:
+				# In all other circumstances, record a hit
+				# against the existing greylist entry.
+
+				self.updateGreylist ()
+				printLog ("greylist match: ip=%s sender=%s recipient=%s" % (ip,sender,recipient))
+
+		return elapsed
+
+
+	def updateGreylist (self):
+
+		ip,sender,recipient = self.triplet ()
+	
+		now = int (time.time ())
+
+		query = """ UPDATE greylist
+			    SET
+			    last=%d,count=count+1
+			    WHERE
+			    ip='%s'
+			    AND
+			    sender='%s'
+			    AND
+			    recipient='%s'
+			""" % (now,ip,sender,recipient)
+
+		self.sql.execute (query)
+
+
+	def greyToWhite (self):
+
+		ip,sender,recipient = self.triplet ()
+
+		# Check first for a matching whitelist entry.
+
+		k = """SELECT COUNT(*) FROM whitelist
+			WHERE
+			ip='%s'
+		    """ % (ip)
+
+		result = self.sql.select (k)
+
+		# There should not be a matching whitelist entry, since the
+		# inbound message would have hit an existing whitelist entry
+		# before going to greylist processing. The probability, however,
+		# is not completely zero.
+
+		now = int (time.time ())
+
+		insert_query = """ INSERT INTO whitelist
+					(ip, last, comment)
+					VALUES
+					('%s', %d, 'auto-whitelisted %d')
+				""" % (ip, now, now)
+
+		update_query = """ UPDATE whitelist
+					SET
+					last=%d
+					WHERE
+					ip='%s'
+					AND
+					last < %d
+				""" % (now, ip, now)
+
+		if result[0] == 0:
+			# New whitelist entry.
+
+			query = insert_query
+		else:
+			# Update the existing whitelist entry.
+
+			query = update_query
+
+		# Even after taking care to inspect the whitelist first,
+		# there is still a race condition, especially if you have
+		# more than one greylisting instance talking to the same
+		# database instance.
+
+		retry = False
+		try:
+			self.sql.execute (query)
+		except DatabaseError:
+			retry = True
+
+		if retry == True:
+			# If there is a further DatabaseError, let it
+			# pass to the parent uncaught.
+
+			query = update_query
+			self.sql.execute (query)
+
+		# Remove now-unnecessary greylist entries.
+
+		k = """DELETE FROM greylist
+			WHERE
+			ip='%s'
+		    """ % (ip)
+
+		self.sql.execute(k)
+
+
+
+# Dummy subclass of ThreadingTCPServer just to set allow_reuse_address
+class GrappyTCPServer (SocketServer.ThreadingTCPServer):
+	allow_reuse_address = True
+
+
+# Begin main execution.
+
+main ()
+
+# EOF

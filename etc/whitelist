@@ -1,0 +1,161 @@
+# This file is formatted in two whitespace-delimited columns.
+#
+# Entries for whitelisting come in two forms:
+#
+# spfname	spf
+# domainname	mx
+# domainname	name
+# address	ip
+#
+# Examples:
+#
+# _spf.google.com	spf		# whitelist all entries in an SPF record
+# whitehouse.gov	mx		# whitelist mx record(s) by name
+# whitehouse.gov	name		# whitelist address(es) by name
+# 192.168.10.1		ip		# whitelist a single address
+# 192.168.10.0/24	ip		# whitelist a range of addresses
+#
+# The initial contents of this file are based on typical whitelists posted
+# for use with OpenBSD's spamd. In order for the active whitelist to be updated,
+# the update-whitelist script should be invoked. The script will do all the
+# necessary lookups for spf records, and will perform the following
+# modifications on the grappy database tables:
+#
+#	* Any whitelist entries that already exist will have
+#	  their 'last hit' timestamp updated to the current
+#	  time
+#
+#	* Any new whitelist entries will be added as necessary
+#
+#	* Any greylist entries that match a new whitelist entry
+#	  will be removed
+#
+# It is recommended that the update-whitelist script be invoked slightly more
+# frequently than your expiration period for whitelist entries; for example,
+# if you invoke update-whitelist every seven days, make sure that whitelist
+# entries expire every 169 hours (seven days plus one hour).
+
+amazon.com		spf
+apple.com		spf
+gmx.net			spf
+_spf.google.com		spf
+spf-a.hotmail.com	spf
+spf-b.hotmail.com	spf
+spf-c.hotmail.com	spf
+spf-d.hotmail.com	spf
+_spf-a.microsoft.com	spf
+_spf-b.microsoft.com	spf
+_spf-c.microsoft.com	spf
+mynethost.com		spf
+
+# Individual IP addresses pulled from:
+#
+# http://projects.puremagic.com/web-svn/wsvn/greylisting/trunk/schema/whitelist_ip.txt
+
+12.5.136.141		ip	# Southwest Airlines (unique sender, no retry)
+12.5.136.142		ip	# Southwest Airlines (unique sender, no retry)
+12.5.136.143		ip	# Southwest Airlines (unique sender, no retry)
+12.5.136.144		ip	# Southwest Airlines (unique sender, no retry)
+12.107.209.244		ip	# kernel.org mailing lists (unique sender)
+63.82.37.110		ip	# SLmail
+63.169.44.143		ip	# Southwest Airlines (unique sender, no retry)
+63.169.44.144		ip	# Southwest Airlines (unique sender, no retry)
+64.7.153.18		ip	# sentex.ca (common pool)
+64.124.204.39		ip	# moveon.org (unique sender per attempt)
+64.125.132.254		ip	# collab.net (unique sender per attempt)
+66.94.237.0/24		ip	# Yahoo Groups servers (common pool, no retry)
+66.100.210.82		ip	# Groupwise?
+66.135.209.0/24		ip	# Ebay (for time critical alerts)
+66.135.197.0/24		ip	# Ebay (common pool)
+66.162.216.166		ip	# Groupwise?
+66.206.22.82		ip	# PLEXOR
+66.206.22.83		ip	# PLEXOR
+66.206.22.84		ip	# PLEXOR
+66.206.22.85		ip	# PLEXOR
+66.218.66.0/24		ip	# Yahoo Groups servers (common pool, no retry)
+66.218.67.0/24		ip	# Yahoo Groups servers (common pool, no retry)
+66.218.69.0/24		ip	# Yahoo Groups servers (common pool, no retry)
+66.27.51.218		ip	# ljbtc.com (Groupwise)
+194.245.101.88		ip	# Joker.com (email forwarding server)
+195.235.39.19		ip	# Tid InfoMail Exchanger v2.20
+195.238.2.0/24		ip	# skynet.be (wierd retry pattern, common pool)
+195.238.3.0/24		ip	# skynet.be (wierd retry pattern, common pool)
+204.107.120.10		ip	# Ameritrade (no retry)
+205.206.231.0/24	ip	# SecurityFocus.com (unique sender per attempt)
+205.211.164.50		ip	# sentex.ca (common pool)
+207.115.63.0/24		ip	# Prodigy (continually retries with no delay)
+209.132.176.174		ip	# sourceware.org mailing lists (unique sender per mail)
+211.29.132.0/24		ip	# optusnet.com.au (wierd retry pattern, 48 hrs+)
+213.136.52.31		ip	# Mysql.com (unique sender)
+217.158.50.178		ip	# AXKit mailing list (unique sender per attempt)
+
+# Included from:
+#
+# http://postmaster.aol.com/servers/imo.html
+
+
+64.12.78.142		ip
+64.12.100.31		ip
+64.12.137.1		ip
+64.12.137.2		ip
+64.12.137.3		ip
+64.12.137.4		ip
+64.12.137.5		ip
+64.12.137.6		ip
+64.12.137.7		ip
+64.12.137.8		ip
+64.12.137.9		ip
+64.12.137.11		ip
+64.12.138.200		ip
+64.12.138.204		ip
+64.12.138.209		ip
+64.12.138.210		ip
+64.12.143.99		ip
+64.12.143.100		ip
+64.12.143.101		ip
+64.12.206.39		ip
+64.12.206.40		ip
+64.12.206.41		ip
+64.12.206.42		ip
+205.188.105.143		ip
+205.188.105.144		ip
+205.188.105.145		ip
+205.188.105.146		ip
+205.188.105.147		ip
+205.188.139.136		ip
+205.188.139.137		ip
+205.188.144.207		ip
+205.188.144.208		ip
+205.188.157.35		ip
+205.188.157.36		ip
+205.188.157.37		ip
+205.188.157.38		ip
+205.188.157.39		ip
+205.188.157.40		ip
+205.188.157.41		ip
+205.188.157.42		ip
+205.188.157.43		ip
+205.188.159.7		ip
+205.188.169.203		ip
+64.12.143.146		ip
+64.12.143.147		ip
+64.12.143.151		ip
+205.188.249.129		ip
+205.188.249.132		ip
+205.188.249.133		ip
+205.188.58.1		ip
+205.188.58.2		ip
+205.188.58.3		ip
+205.188.58.4		ip
+205.188.58.65		ip
+205.188.58.66		ip
+205.188.58.67		ip
+205.188.58.68		ip
+64.12.102.137		ip
+64.12.102.138		ip
+64.12.102.139		ip
+64.12.102.140		ip
+64.12.207.165		ip
+64.12.207.166		ip
+64.12.207.167		ip
+64.12.207.168		ip

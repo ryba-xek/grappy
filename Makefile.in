@@ -1,0 +1,82 @@
+prefix		= @prefix@
+exec_prefix	= @exec_prefix@
+sysconfdir	= @sysconfdir@
+bindir		= @bindir@
+sbindir		= @sbindir@
+
+BINFILES  = bin/update-whitelist bin/expire-mysql bin/expire-postgresql
+SBINFILES = sbin/grappy
+ETCFILES  = etc/expire-mysql.sql	\
+	    etc/expire-postgresql.sql	\
+	    etc/grappy.conf		\
+	    etc/whitelist
+
+INIT	  = init.d/generic init.d/linux
+
+BUILD	  = $(BINFILES) $(SBINFILES) $(INIT) etc/grappy.conf
+
+default: all
+
+all: $(BUILD)
+
+install: install-dirs install-etc install-bin install-sbin
+
+INSTALL = @INSTALL@
+
+install-dirs:
+	$(INSTALL) -d -m 755 $(bindir)
+	$(INSTALL) -d -m 755 $(sbindir)
+	$(INSTALL) -d -m 755 $(sysconfdir)
+
+install-etc: $(ETCFILES)
+	$(INSTALL) -m 644 $^ $(sysconfdir)
+
+install-bin: $(BINFILES)
+	$(INSTALL) -m 755 $^ $(bindir)
+
+install-sbin: $(SBINFILES)
+	$(INSTALL) -m 755 $^ $(sbindir)
+
+DIG	= @DIG@
+GREP	= @GREP@
+KILL	= @KILL@
+SH	= @SH@
+PID	= @PID@
+PSQL	= @PSQL@
+PYTHON	= @PYTHON@
+MYSQL	= @MYSQL@
+
+SED = @SED@
+
+EDIT = $(SED) \
+	-e 's|@bindir[@]|$(bindir)|g'		\
+	-e 's|@sbindir[@]|$(sbindir)|g'		\
+	-e 's|@sysconfdir[@]|$(sysconfdir)|g'	\
+	-e 's|@prefix[@]|$(prefix)|g'		\
+	-e 's|@DIG[@]|$(DIG)|g'			\
+	-e 's|@GREP[@]|$(GREP)|g'		\
+	-e 's|@KILL[@]|$(KILL)|g'		\
+	-e 's|@SH[@]|$(SH)|g'			\
+	-e 's|@PID[@]|$(PID)|g'			\
+	-e 's|@PSQL[@]|$(PSQL)|g'		\
+	-e 's|@PYTHON[@]|$(PYTHON)|g'		\
+	-e 's|@MYSQL[@]|$(MYSQL)|g'
+
+% :: %.in
+	@$(EDIT) < $^ > $@
+	@echo $^'  >>  '$@
+
+clean:
+	rm -f $(BUILD)
+
+distclean: clean
+	rm -f config.log config.status Makefile
+	rm -f -r autom4te.cache
+
+tarball: distclean
+
+	mkdir ../grappy-$(VERSION)
+	tar cf - --exclude CVS --exclude .cvsignore . | (cd ../grappy-$(VERSION) && tar xfBp -)
+	rm -f ../grappy-$VERSION.tar.gz
+	(cd .. && tar zcf grappy-$(VERSION).tar.gz grappy-$(VERSION))
+	rm -f -r ../grappy-$(VERSION)
