@@ -1,0 +1,11 @@
+#!@SH@
+
+INTERPRETER=@MYSQL@
+SQL=@sysconfdir@/expire-mysql.sql
+
+DATABASE=grappy
+USERNAME=grappy
+
+# Invoke the command.
+
+$INTERPRETER -q -U $USERNAME $DATABASE < $SQL

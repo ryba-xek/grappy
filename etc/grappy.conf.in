@@ -1,0 +1,93 @@
+# Values in this config file are completely arbitrary between the first
+# = character and the end of the line. The only formatting restriction
+# is that you cannot use newlines within strings (nor is it recommended).
+#
+# Default values are displayed.
+
+# The amount of time (in seconds) from the first time a triplet is seen
+# until subsequent retries are allowed through.
+#
+# GREYLIST_DELAY = 300
+
+# Whether to prepend a header onto the message indicating its status.
+# Setting HEADERS = True enables this behavior.
+#
+# HEADERS = True
+
+# The WHITE_ADD_HEADER is passed the amount of time that passed since a
+# particular triplet was first seen and when it was allowed through, and
+# the sending IP address.
+#
+# The WHITE_HEADER and GREY_HEADER are only passed the IP address.
+#
+# If none of those values are used in your formatting, it will not cause
+# an error.
+#
+# GREY_HEADER	 = X-Greylist: sender %s passed by greylist match
+# WHITE_ADD_HEADER = X-Greylist: sender %s whitelisted after %d seconds
+# WHITE_HEADER	 = X-Greylist: sender %s whitelisted
+# ERROR_HEADER	 = X-Greylist: internal error bypassed, message accepted
+
+# Munge sender addresses to handle VERPish messages. Everything
+# after the first - or + character is effectively dropped from
+# the left-hand-side of the sender address.
+#
+# MUNGE_SENDER = True
+
+# Enabling AUTO_WHITELIST will cause sending IP addresses to be entered
+# into a whitelist after successfully passing a greylist check. Their
+# entries in the greylist table would subsequently be removed.
+#
+# Unused entries will expire from the whitelist according to the
+# settings in the delete-expired*.sql scripts.
+#
+# Use of the automatic whitelist is strongly encouraged.
+#
+# AUTO_WHITELIST = True
+
+# Greylist on network (/24) instead of exact ip. If AUTO_WHITELIST is
+# enabled, it is not recommended that you enable this feature.
+#
+# LIGHTGREY = False
+
+# The message sent to the remote MTA when the inbound message is greylisted.
+#
+# GREYLIST_MESSAGE = Thank you for your interest, please try again later
+
+# When LEARNING_MODE is enabled, any messages that would have been greylisted
+# are instead allowed through. All normal database operations occur, including
+# updating of greylist records and automatic whitelisting, if enabled.
+#
+# This is an effective way to build up a 'live' database before grappy is
+# initiallty deployed.
+#
+# LEARNING_MODE = False
+
+# Allow messages when internal processing errors occur. Typically, this means
+# database errors, such as your database backend being offline.
+#
+# PASS_ON_ERROR = True
+
+# Database configuration. Valid choices for DBTYPE are 'postgresql' or 'mysql'.
+# DBTIMEOUT is how many seconds grappy will wait while trying to establish
+# a database connection (if it needs one) before throwing an error.
+#
+# DBHOST = localhost
+# DBNAME = grappy
+# DBUSER = grappy
+# DBPASS = something
+# DBTYPE = postgresql
+# DBTIMEOUT = 2
+
+# What address and port should we bind ourselves to?
+#
+# ADDRESS = 127.0.0.1
+# PORT = 10026
+
+# PID file.
+#
+# PID_FILE = @PID@
+
+# Set DEBUG to True for debug on stdout; also disables daemon-mode.
+#
+# DEBUG = False

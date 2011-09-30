@@ -1,0 +1,821 @@
+#!@PYTHON@
+
+# Ingest the grappy whitelist file, and update the grappy whitelist table
+# after parsing and interpreting the contents.
+
+WHITELIST = '@sysconfdir@/whitelist'
+
+# We need the location of BIND's 'dig' program in order to query DNS records.
+# The regular use of dig to perform lookups is expensive, in terms of compute
+# time. The use of a module like dnspython or PyDNS would be preferable, but
+# neither is included with a stock Python interpreter. We're much more likely
+# to have 'dig' available on a given UNIX host.
+
+DIG = '@DIG@'
+
+# Location of the grappy.conf file.
+
+CONFIG = '@sysconfdir@/grappy.conf'
+
+#
+# #
+# Required libraries.
+# #
+#
+
+import math		# Round up
+import os		# Check for the existence of files
+import subprocess	# invoke DIG to query SPF records
+import time		# Retrieve current time
+
+#
+# #
+# Sanity checks.
+# #
+#
+
+if os.path.isfile (DIG):
+	pass
+else:
+	raise ValueError, "cannot find specified 'dig' binary: %s" % (DIG)
+
+if os.path.isfile (WHITELIST):
+	pass
+else:
+	raise ValueError, "cannot find specified whitelist file: %s" % (WHITELIST)
+
+if os.path.isfile (CONFIG):
+	pass
+else:
+	raise ValueError, "cannot find grappy config file: %s" % (CONFIG)
+
+#
+# #
+# Read in the config file.
+# #
+#
+
+DBNAME = 'grappy'
+DBUSER = 'grappy'
+DBPASS = 'something'
+DBHOST = 'localhost'
+DBTYPE = 'postgresql'
+
+config = open (CONFIG, 'r')
+config = config.read ()
+config = config.split ('\n')
+
+for line in config:
+	# Strip out comments.
+	line = line.split ('#', 1)[0]
+
+	# Eliminate whitespace.
+	line = line.strip ()
+
+	# No further processing on blank lines.
+	if line == '':
+		continue
+	
+	variable, value = line.split ('=', 1)
+
+	variable = variable.strip ()
+	value    = value.strip ()
+
+	if variable == 'DBNAME':
+		DBNAME = value
+
+	elif variable == 'DBUSER':
+		DBUSER = value
+
+	elif variable == 'DBPASS':
+		DBPASS = value
+
+	elif variable == 'DBHOST':
+		DBHOST = value
+
+	elif variable == 'DBTYPE':
+		DBTYPE = value
+
+
+DBTYPE = DBTYPE.lower ()
+
+if DBTYPE == 'postgresql':
+	pass
+elif DBTYPE == 'mysql':
+	pass
+else:
+	raise ValueError, "unrecognized value for DBTYPE: %s" % (DBTYPE)
+
+#
+# #
+# Main execution.
+# #
+#
+
+def main ():
+
+	parsed = parseWhitelist (WHITELIST)
+
+	addresses = parsed['addresses']
+	subnets   = parsed['subnets']
+
+	# Keyed by address, value is the comment.
+	addresses = {}
+	subnets   = {}
+
+	for subnet in parsed['subnets']:
+		if subnets.has_key (subnet[0]):
+			# Seen this one already. First match wins.
+			continue
+
+		subnets[subnet[0]] = subnet[1]
+
+
+	for address in parsed['addresses']:
+		octets = address[0].split ('.')
+		subnet = '.'.join (address[:-1])
+
+		if subnets.has_key (subnet):
+			# Don't put an address in the whitelist
+			# if it's already covered by a subnet.
+			continue
+
+		addresses[address[0]] = address[1]
+
+
+	if DBTYPE == 'postgresql':	
+		import pgdb
+		connection = pgdb.connect (user=DBUSER,host=DBHOST,database=DBNAME,password=DBPASS)
+		DatabaseError = pgdb.DatabaseError
+
+
+	elif DBTYPE == 'mysql':
+		import MySQLdb
+		connection = MySQLdb.connect (user=DBUSER,host=DBHOST,db=DBNAME,passwd=DBPASS)
+		DatabaseError = MySQLdb.DatabaseError
+
+	cursor = connection.cursor ()
+	now = int (time.time ())
+
+	for subnet in subnets.keys ():
+		comment = subnets[subnet]
+
+		query = "SELECT COUNT(*) FROM whitelist WHERE ip='%s'" % (subnet)
+
+		cursor.execute (query)
+		results = cursor.fetchall ()
+
+		update = "UPDATE whitelist SET last=%d WHERE ip='%s'" % (now, subnet)
+		if results[0][0] > 0:
+			cursor.execute (update)
+		else:
+			query = "INSERT INTO whitelist (ip, last, comment) VALUES ('%s', %d, '%s')" % (subnet, now, comment)
+
+			try:
+				cursor.execute (query)
+			except DatabaseError:
+				# By some fluke of timing, a matching whitelist
+				# entry showed up right as we were about to add
+				# it, just after we checked to see if it was
+				# there.
+				cursor.execute (update)
+
+			# Remove greylist and whitelist entries for single
+			# addresses that match this subnet. Note the '.'
+			# between the subnet and the wildcard.
+
+			query = "DELETE FROM greylist WHERE ip LIKE '%s.%%'" % (subnet)
+
+			cursor.execute (query)
+
+			query = "DELETE FROM whitelist WHERE ip LIKE '%s.%%'" % (subnet)
+
+			cursor.execute (query)
+
+		connection.commit ()
+
+
+	for address in addresses.keys ():
+		comment = addresses[address]
+
+		query = "SELECT COUNT(*) FROM whitelist WHERE ip='%s'" % (address)
+
+		cursor.execute (query)
+		results = cursor.fetchall ()
+
+		update = "UPDATE whitelist SET last=%d WHERE ip='%s'" % (now, address)
+		if results[0][0] > 0:
+			cursor.execute (update)
+		else:
+			query = "INSERT INTO whitelist (ip, last, comment) VALUES ('%s', %d, '%s')" % (address, now, comment)
+
+
+			try:
+				cursor.execute (query)
+			except DatabaseError:
+				# By some fluke of timing, a matching whitelist
+				# entry showed up right as we were about to add
+				# it, just after we checked to see if it was
+				# there.
+				cursor.execute (update)
+
+			# Remove greylist and whitelist entries for single
+			# addresses that match this address.
+
+			query = "DELETE FROM greylist  WHERE ip='%s'" % (address)
+
+			cursor.execute (query)
+
+		connection.commit ()
+
+	cursor.close ()
+
+	# End of main () execution.
+
+#
+# #
+# Helper functions.
+# #
+#
+
+def parseWhitelist (filename):
+	''' Open the file at 'filename', read its contents, and translate
+	    the contents as necessary. Return a list of addresses and subnets
+	    that need to be inserted/updated in the database.
+	'''
+
+	whitelist = open (filename, 'r')
+	contents  = whitelist.read ()
+	whitelist.close ()
+
+	whitelist = contents.split ('\n')
+
+	addresses = []
+	subnets   = []
+
+	for line in whitelist:
+
+		original = line
+
+		# Eliminate comments.
+		line = line.split ('#', 1)[0]
+
+		# Eliminate whitespace.
+		line = line.strip ()
+
+		# Skip empty lines.
+		if line == '':
+			continue
+
+		# All that should be left are two-column pairs,
+		# delimited by whitespace.
+
+		columns = line.split ()
+
+		if len (columns) != 2:
+			raise ValueError, "badly formatted line in whitelist: '%s'" % (original)
+
+		address = columns[0]
+		type    = columns[1]
+
+		if type == 'ip':
+			comment = "enforced, direct from whitelist"
+
+			if address.find ('/') == -1:
+				# Regular address.
+				validateIPv4 (address)
+				addresses.append ((address, comment))
+			else:
+				# CIDR format.
+				translated = translateCIDR (address, comment)
+
+				addresses.extend (translated['addresses'])
+				subnets.extend   (translated['subnets'])
+
+		elif type == 'spf':
+
+			results = querySPF (address)
+
+			addresses.extend (results['addresses'])
+
+			for subnet in results['subnets']:
+				comment = subnet[1]
+				subnet  = subnet[0]
+
+				translated = translateCIDR (subnet, comment)
+
+				addresses.extend (translated['addresses'])
+				subnets.extend   (translated['subnets'])
+
+
+		elif type == 'name':
+			results = queryHostname (address)
+
+			addresses.extend (results)
+
+		elif type == 'mx':
+			results = queryMX (address)
+
+			addresses.extend (results)
+
+		else:
+			raise ValueError, "unrecognized record type '%s' in line: %s" % (type, original)
+
+
+	output = {}
+	output['addresses'] = addresses
+	output['subnets']   = subnets
+
+	return output
+
+
+def validateIPv4 (address):
+	''' Raise ValueError if the provided address is not a valid IPv4
+	    address.
+	'''
+
+	if address != address.strip ():
+		raise ValueError, "IP address contains whitespace: '%s'" % (address)
+
+	octets = address.split ('.')
+
+	if len (octets) != 4:
+		raise ValueError, "IP address does not contain four dotted octets: '%s'" % (address)
+
+	for octet in octets:
+		octet = int (octet)
+
+		if octet < 0 or octet > 255:
+			raise ValueError, "IP address contains invalid octet: '%s'" % (address)
+
+	# If we got this far, it's good.
+
+
+def translateCIDR (input, comment):
+	''' Translate a range of IP addresses specified in CIDR notation
+	    into a format understood by the grappy whitelist-- effectively,
+	    a list of /24 and/or /32 addresses.
+
+	    Example:
+
+	    192.168.22.0/23
+	    
+	    ...would get translated to:
+	    
+	    192.168.22
+	    192.168.23
+
+	    Ranges from /25 to /32 are translated to individual addresses.
+	    For example, 192.168.22.0/25 would get expanded to 192.168.22.0
+	    through and including 192.168.22.127.
+	'''
+
+	output = {}
+	output['addresses'] = []
+	output['subnets']   = []
+
+	if input.find ('/') == -1:
+		raise ValueError, "argument does not look like CIDR notation: %s" % (input)
+
+	if input.find (':') != -1:
+		raise ValueError, "argument appears to be IPv6, which is not (yet) supported: %s" % (input)
+
+	address, mask = input.split ('/')
+
+	mask = int (mask)
+
+	if mask < 8:
+		raise ValueError, "address mask less than /8 not allowed: %s" % (input)
+
+	if mask > 32:
+		# This implies we're only dealing with IPv4 ranges.
+		# IPv6 runs up to /128.
+
+		raise ValueError, "address mask greater than /32 not allowed: %s" % (input)
+
+
+	# Be flexible about how many octets are provided. We should allow
+	# for arguments that look like 192.168.22/23 or 192.168/16.
+
+	octets = address.split ('.')
+
+	required_octets = math.ceil ((float (mask) / 8))
+
+	if required_octets > len (octets):
+		raise ValueError, "inadequate quantity of octets specified for mask: %s" % (input)
+
+
+	int_octets = []
+
+	for octet in octets:
+		octet = int (octet)
+
+		if octet < 0 or octet > 255:
+			raise ValueError, "invalid IPv4 prefix: %s" % (input)
+
+		int_octets.append (octet)
+
+	# Having validated the individual octets, if a /32 is specified,
+	# return the original address.
+
+	if mask == 32:
+		output['addresses'].append ((address, comment))
+		return output
+
+	octets = int_octets
+
+	while len (octets) < 4:
+		octets.append (0)
+
+	# Concatentate the octets into a single integer, suitable for
+	# binary operations.
+
+	octets.reverse ()
+	address = 0
+	shift = 0
+
+	for octet in octets:
+
+		octet	= octet << shift
+		address	= address + octet
+
+		shift	= shift + 8
+
+	# Get rid of any spurious bits present in the masked part of
+	# the address.
+
+	address = address >> (32 - mask)
+	address = address << (32 - mask)
+
+	if mask > 24:
+		# Regurgitate every IP address in this range.
+
+		addresses = []
+
+		# Combine the significant bits of the address
+		# with the bits possible in the mask.
+
+		for component in range (2 ** (32 - mask)):
+			addresses.append (address | component)
+
+		results = []
+
+		for address in addresses:
+			octets = []
+
+			# Rebuild octets.
+
+			shift = 0
+
+			while shift < 32:
+				# Mask off eight bits of the binary address.
+
+				octet = address & (255 << shift)
+
+				octet = octet >> shift
+
+				octets.append ('%s' % (octet))
+
+				shift = shift + 8
+
+			octets.reverse ()
+			result = '.'.join (octets)
+
+			results.append ((result, comment))
+
+		output['addresses'] = tuple (results)
+		return output
+
+
+	# Otherwise, the mask is somewhere between 8 and 24. We need to
+	# return the results as /24's, but without the mask appended,
+	# and with only three octets specified.
+
+	# We only care about the upper 24 bits at this point.
+	# Lose the lower 8.
+
+	address = address >> 8
+
+	addresses = []
+
+	if mask == 24:
+		# If the mask is /24, it gets appended as-is, no expansion
+		# required.
+
+		addresses.append (address)
+
+	else:
+		# Otherwise, combine the significant bits of the address
+		# with the bits possible in the mask.
+
+		for component in range (2 ** (24 - mask)):
+			addresses.append (address | component)
+
+	results = []
+
+	for address in addresses:
+		octets = []
+
+		# Rebuild octets.
+
+		shift = 0
+
+		while shift < 24:
+			# Mask off eight bits of the binary address.
+
+			octet = address & (255 << shift)
+
+			octet = octet >> shift
+
+			octets.append ('%s' % (octet))
+
+			shift = shift + 8
+
+		octets.reverse ()
+		result = '.'.join (octets)
+
+		results.append ((result, comment))
+
+	output['subnets'] = tuple (results)
+	return output
+
+
+
+def queryHostname (hostname):
+	''' Query the IN A record associated with hostname, and return
+	    the IPv4 components of the record as a tuple of entries.
+	'''
+
+	hostname = hostname.lower ()
+
+	# Make sure the last character of the hostname is a dot.
+	# In other words, that we're dealing with a fully-qualified
+	# domain name.
+
+	if hostname[-1] != '.':
+		hostname = '%s.' % (hostname)
+
+
+	arguments = (DIG, hostname, 'A', '+short')
+
+	command = subprocess.Popen (arguments, stdout=subprocess.PIPE)
+
+	results = command.communicate ()[0]
+	results = results.strip ()
+
+	if results == '':
+		raise ValueError, "no IN A record for hostname: %s" % (hostname)
+
+	comment = "enforced, from %s IN A record" % (hostname)
+
+	addresses = []
+
+	results = results.split ('\n')
+
+	for result in results:
+		result = result.split (';', 1)[0]
+		result = result.strip ()
+
+		if result == '':	
+			# Probably originally a comment.
+			continue
+
+		addresses.append (result)
+
+	results = []
+
+	for address in addresses:
+		results.append ((address, comment))
+
+	return tuple (results)
+
+
+
+def queryMX (hostname):
+	''' Query the IN MX record associated with hostname, and return
+	    the IPv4 addresses of the designated hostnames.
+	'''
+
+	hostname = hostname.lower ()
+
+	# Make sure the last character of the hostname is a dot.
+	# In other words, that we're dealing with a fully-qualified
+	# domain name.
+
+	if hostname[-1] != '.':
+		hostname = '%s.' % (hostname)
+
+
+	arguments = (DIG, hostname, 'MX', '+short')
+
+	command = subprocess.Popen (arguments, stdout=subprocess.PIPE)
+
+	results = command.communicate ()[0]
+	results = results.strip ()
+
+	if results == '':
+		raise ValueError, "no IN MX record for hostname: %s" % (hostname)
+
+	comment = "enforced, from %s MX record" % (hostname)
+
+	addresses = []
+
+	results = results.split ('\n')
+
+	for result in results:
+		result = result.split (';', 1)[0]
+		result = result.strip ()
+		result = result.lower ()
+
+		if result == '':	
+			# Probably originally a comment.
+			continue
+	
+		# MX results will contain the priority and hostname
+		# as whitespace-sparated values.
+
+		columns = result.split ()
+
+		if len (columns) != 2:
+			raise ValueError, "unknown format for '%s' MX record: %s" % (hostname, result)
+
+		mx_addresses = queryHostname (columns[1])
+
+		for address in mx_addresses:
+			addresses.append (address[0])
+
+	results = []
+
+	for address in addresses:
+		results.append ((address, comment))
+
+	return tuple (results)
+
+
+
+def querySPF (hostname):
+	''' Query the SPF record associated with hostname, and return
+	    the IPv4 components of the record as a tuple of entries.
+
+	    For example, the SPF record for _spf.google.com looks like:
+
+	    v=spf1 ip4:216.239.32.0/19 ip4:64.233.160.0/19 
+
+	    After making the query, this function will process the
+	    results and return tuples of CIDR notation subnets and
+	    IP addresses. Using the above example, the following
+	    subnets would be in the 'subnets' tuple in the returned
+	    dictionary:
+
+	    ('216.239.32.0/19', '64.233.160.0/19')
+
+	    If the query is not successful or otherwise does not return
+	    results, querySPF () raises a ValueError exception.
+	'''
+
+	hostname = hostname.lower ()
+
+	# Make sure the last character of the hostname is a dot.
+	# In other words, that we're dealing with a fully-qualified
+	# domain name.
+
+	if hostname[-1] != '.':
+		hostname = '%s.' % (hostname)
+
+
+	arguments = (DIG, hostname, 'TXT', '+short')
+
+	command = subprocess.Popen (arguments, stdout=subprocess.PIPE)
+
+	results = command.communicate ()[0]
+	results = results.strip ()
+
+	if results == '':
+		raise ValueError, "no SPF TXT record for hostname: %s" % (hostname)
+
+	addresses = []
+	subnets = []
+
+	results = results.split ('\n')
+
+	for result in results:
+		result = result.split (';', 1)[0]
+		result = result.strip ('"')
+		result = result.strip ()
+		result = result.lower ()
+
+		if result == '':	
+			# Probably originally a comment.
+			continue
+
+		entries = result.split ()
+
+		if entries[0] == 'v=spf1':
+			entries.pop (0)
+		elif entries[0][:7] == 'spf2.0/':
+			# Skip SPF version 2 results.
+			continue
+		else:
+			# Skip non-actionable content.
+			continue
+
+
+		comment = "enforced, from %s SPF record" % (hostname)
+
+		# We don't care about the optional modififer at the end.
+
+		if entries[-1].find ('all') != -1:
+			entries.pop (-1)
+
+
+		for entry in entries:
+
+			queried = ()
+			entry = entry.lower ()
+
+			# Accept 'ipv4' even though the specification
+			# states 'ip4' as the correct syntax.
+
+			if entry[:4] == 'ip4:' or entry[:5] == 'ipv4:':
+
+				# Address is the right-hand side.
+				address = entry.split (':', 1)[1]
+
+				if address.find ('/') == -1:
+					addresses.append ((address, comment))
+				else:
+					subnets.append ((address, comment))
+
+			elif entry[:4] == 'ip6:' or entry[:5] == 'ipv6':
+				# Cowardly not handling IPv6.
+				pass
+
+			elif entry[:2] == 'a:':
+				queried = queryHostname (entry[2:])
+
+			elif entry == 'a':
+				queried = queryHostname (hostname)
+
+			elif entry[:3] == 'mx:':
+				queried = queryMX (entry[3:])
+
+			elif entry == 'mx':
+				queried = queryMX (hostname)
+
+			elif entry[:3] == 'ptr':
+				raise ValueError, "grappy cannot handle whitelisting based on name (spf record for %s)" % (hostname) 
+
+			else:
+				# Maybe it's an address or subnet without the
+				# ip4 prefix. Yes, this is a violation of the
+				# standard, but it sometimes happens, even to
+				# the best of us; Amazon.com had just such an
+				# entry in December 2010.
+
+				try:
+					validateIPv4 (entry)
+					valid = True
+				except:
+					valid = False
+
+				if valid:
+					addresses.append ((entry, comment))
+					continue
+
+
+				try:
+					# Might save some cycles by having
+					# validateCIDR () routine.
+
+					translateCIDR (entry, '')
+					valid = True
+				except:
+					valid = False
+
+				if valid:
+					subnets.append ((entry, comment))
+					continue
+
+				# Not an address or subnet.
+				raise ValueError, "unhandled entry ('%s') in SPF TXT result for '%s'" % (entry, hostname)
+
+
+			# Append any queried results, after first wiping
+			# out any comments from the query functions.
+
+			for address in queried:
+				addresses.append ((address[0], comment))
+
+
+	output = {}
+	output['addresses'] = tuple (addresses)
+	output['subnets']   = tuple (subnets)
+
+	return output
+
+
+# Invoke our main ().
+
+main ()
+
+# EOF

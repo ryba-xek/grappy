@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+#	/etc/rc.d/init.d/grappy
+#
+# Starts the greylisting daemon
+#
+# chkconfig: 345 89 99
+# description: greylisting daemon
+# processname: grappy
+
+# $Id: linux.in,v 1.3 2010/02/14 14:08:51 lanclos Exp $
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+GRAPPY=@sbindir@/grappy
+
+#
+#	See how we were called.
+#
+case "$1" in
+  start)
+	# Check if grappy is already running
+	echo -n $"Starting greylisting daemon: "
+	$GRAPPY
+	RETVAL=$?
+	echo
+	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/grappy
+	;;
+  stop)
+	echo -n $"Stopping greylisting daemon: "
+	killproc grappy
+	RETVAL=$?
+	echo
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/grappy
+	;;
+  reload|restart)
+	$0 stop
+	$0 start
+	;;
+  status)
+	status grappy
+	;;
+  *)
+	echo "Usage: $0 {start|stop|restart|reload|status}"
+	exit 1
+esac
+
+exit 0

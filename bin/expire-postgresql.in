@@ -1,0 +1,11 @@
+#!@SH@
+
+INTERPRETER=@PSQL@
+SQL=@sysconfdir@/expire-postgresql.sql
+
+DATABASE=grappy
+USERNAME=grappy
+
+# Invoke the command.
+
+$INTERPRETER -q -U $USERNAME $DATABASE < $SQL

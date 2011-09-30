@@ -1,0 +1,31 @@
+#!@SH@
+
+GRAPPY=@sbindir@/grappy
+GREP=@GREP@
+KILL=@KILL@
+PID_FILE=@PID@
+
+case "$1" in
+'start')
+	if [ -x $GRAPPY ]; then
+		echo "grappy starting..."
+		$GRAPPY 1>/dev/console 2>&1
+	else
+		echo "grappy daemon not found:	$GRAPPY"
+	fi
+	;;
+
+'stop')
+	if [ -f $PID_FILE ]; then
+		PID=`cat $PID_FILE`
+		if [ "$PID" -gt 0 ]; then
+			echo "Stopping the grappy service."
+			$KILL -15 $PID 2>&1 | $GREP -v "no such process"
+		fi
+	fi
+	;;
+*)
+	echo "Usage: $0 { start | stop }"
+	;;
+esac
+exit 0

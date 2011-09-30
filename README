@@ -1,0 +1,99 @@
+grappy is a postfix policy daemon which implements greylisting functionality.
+This is just one of many implementations. More information on the greylisting
+technique is available at:
+
+	http://projects.puremagic.com/greylisting/
+
+This package can be found at:
+
+	http://grappy.lanclos.org/
+
+
+Pre-requisites:
+
+Postfix 2.1 or later.
+
+A relatively modern Python 2.x interpreter (at least 2.3, maybe 2.4).
+
+A SQL database backend. Currently, only PostgreSQL and MySQL are supported.
+PostgreSQL is recommended, as it appears to be more well-behaved with grappy,
+especially when multiple threads are active.
+
+PostgreSQL support requires the PyGreSQL module:
+
+	http://www.pygresql.org/
+
+MySQL support requires the MySQL-python module:
+
+	http://sourceforge.net/projects/mysql-python/
+
+
+Installation:
+
+Use the provided configure script to set up the basics. For details,
+invoke:
+
+	./configure --help
+
+In particular, note the --with-python and --with-psql options.
+
+You will need to set up the databases and tables for use by grappy.
+The table structure is described in etc/initialize-*.sql. Please see
+the backend-specific file for details.
+
+
+Configuration:
+
+There are a number of configuration options which are listed in the
+etc/grappy.conf file. At a minimum, you will likely want to change
+the default database password. The remainder of the options are
+sensible for a typical configuration. When you initially start testing
+grappy in your environment, you may want to enable the LEARNING_MODE
+option before you fully deploy greylisting.
+
+In your postfix/main.cf file, you need to tell your postfix instance
+how and when to query grappy. This is most easily accomplished via the
+smtpd_recipient_restrictions directive. Here is an example:
+
+smtpd_recipient_restrictions =  permit_sasl_authenticated
+				permit_mynetworks
+				reject_unauth_destination
+				reject_unlisted_recipient
+				reject_unknown_sender_domain
+				reject_rbl_client some.dnsbl.provider
+				check_policy_service inet:127.0.0.1:10026
+
+
+Regular maintenance:
+
+For best behavior, you should set up a cron job to periodically expire
+entries from both the greylist and whitelist database tables. Running
+the expiration script every hour is typically adequate.
+
+If you are using the static whitelist (recommended), you should also
+set up a cron job to refresh the entries in the whitelist table. If you
+do not, entries that do not get any 'hits' will be expired just like any
+other whitelist entry. The time limits in the expiration scripts are
+such that you only need to invoke the update-whitelist script once a week.
+
+Here are example crontab entries:
+
+ 0 * * * * /local/grappy/bin/expire-postgresql
+55 0 * * 0 /local/grappy/bin/update-whitelist
+
+
+Bugs:
+
+Please report any bugs you find to Kyle Lanclos <grappy@lanclos.org>.
+
+
+Contributions:
+
+Many thanks to Mattias Amnefelt <mattiasa@stacken.kth.se>, the previous
+maintainer of grappy.
+
+This software is based on greylist-python which has been placed in the
+public domain by its author Vsevolod Sipakov <versus@megalink.ru>.
+
+Thanks also to all other contributors, bug reporters, and users of grappy.
+Even if the README doesn't remember you, the cvs log will never forget.
