@@ -71,7 +71,9 @@ LIGHTGREY = False
 MUNGE_SENDER = True
 AUTO_WHITELIST = True
 GREYLIST_MESSAGE = "Thank you for your interest, please try again later"
+OPTOUT = []
 LEARNING_MODE = False
+LOG_ATTEMPTS = False
 PASS_ON_ERROR = True
 DBHOST = 'localhost'
 DBNAME = 'grappy'
@@ -165,6 +167,9 @@ for line in config:
 	elif variable == 'GREYLIST_MESSAGE':
 		GREYLIST_MESSAGE = value
 
+	elif variable == 'OPTOUT':
+		OPTOUT = map(lambda s: s.strip().lower(), value.split(' '))
+
 	elif variable == 'LEARNING_MODE':
 		if value == 'True':
 			LEARNING_MODE = True
@@ -172,6 +177,14 @@ for line in config:
 			LEARNING_MODE = False
 		else:
 			raise ValueError, "LEARNING_MODE in grappy.conf must be True or False, not '%s'" % (value)
+
+	elif variable == 'LOG_ATTEMPTS':
+		if value == 'True':
+			LOG_ATTEMPTS = True
+		elif value == 'False':
+			LOG_ATTEMPTS = False
+		else:
+			raise ValueError, "LOG_ATTEMPTS in grappy.conf must be True or False, not '%s'" % (value)
 
 	elif variable == 'PASS_ON_ERROR':
 		if value == 'True':
@@ -547,45 +560,51 @@ class GreylistRequestHandler (SocketServer.StreamRequestHandler):
 
 		ip,sender,recipient = self.info.triplet ()
 
-		whitelisted = self.info.checkWhitelist ()
-
-		if whitelisted:
+		#check opt-out
+		if recipient.lower() in OPTOUT:
 			action = 'dunno'
-			try:
-				header = WHITE_HEADER % (ip)
-			except TypeError:
-				header = WHITE_HEADER
+			header = None
 
 		else:
-			# Check the greylist.
+			whitelisted = self.info.checkWhitelist ()
 
-			elapsed = self.info.checkGreylist ()
-
-			if elapsed < GREYLIST_DELAY:
-				action = "defer_if_permit %s" % (GREYLIST_MESSAGE)
-				header = None
-
-			elif AUTO_WHITELIST:
-				# The configured waiting period has elapsed,
-				# and automatic whitelisting is enabled.
-
+			if whitelisted:
 				action = 'dunno'
-
 				try:
-					header = WHITE_ADD_HEADER % (ip, elapsed)
+					header = WHITE_HEADER % (ip)
 				except TypeError:
-					header = WHITE_ADD_HEADER
+					header = WHITE_HEADER
 
 			else:
-				# The configured waiting period has elapsed,
-				# and automatic whitelisting is not enabled.
+				# Check the greylist.
 
-				action = 'dunno'
+				elapsed = self.info.checkGreylist ()
 
-				try:
-					header = GREY_HEADER % (ip)
-				except TypeError:
-					header = GREY_HEADER
+				if elapsed < GREYLIST_DELAY:
+					action = "defer_if_permit %s" % (GREYLIST_MESSAGE)
+					header = None
+
+				elif AUTO_WHITELIST:
+					# The configured waiting period has elapsed,
+					# and automatic whitelisting is enabled.
+
+					action = 'dunno'
+
+					try:
+						header = WHITE_ADD_HEADER % (ip, elapsed)
+					except TypeError:
+						header = WHITE_ADD_HEADER
+
+				else:
+					# The configured waiting period has elapsed,
+					# and automatic whitelisting is not enabled.
+
+					action = 'dunno'
+
+					try:
+						header = GREY_HEADER % (ip)
+					except TypeError:
+						header = GREY_HEADER
 
 
 		# If a message has multiple recipients, the policy daemon
@@ -652,6 +671,9 @@ class GreylistRequestHandler (SocketServer.StreamRequestHandler):
 					header = None
 				else:
 					printDebug ('Action: %s' % (action))
+
+				if LOG_ATTEMPTS:
+					self.info.logAttempt(action)
 
 				if HEADERS == True and header != None:
 					printDebug ("Header: %s" % (header))
@@ -1068,6 +1090,18 @@ class PolicyInfo:
 		    """ % (ip)
 
 		self.sql.execute(k)
+
+
+	def logAttempt(self, result):
+
+		ip, sender, recipient = self.triplet()
+		now = int(time.time())
+
+		query = """INSERT INTO `log`(`ts`, `ip`, `sender`, `recipient`, `result`) VALUES
+			('%d', '%s', '%s', '%s', '%s')""" % (now, ip, sender, recipient, result)
+
+		self.sql.execute(query)
+
 
 
 

@@ -54,6 +54,11 @@
 #
 # GREYLIST_MESSAGE = Thank you for your interest, please try again later
 
+# Opt-out
+# write a list of recepient emails, separated by space that will not be greylisted
+#
+# OPTOUT =
+
 # When LEARNING_MODE is enabled, any messages that would have been greylisted
 # are instead allowed through. All normal database operations occur, including
 # updating of greylist records and automatic whitelisting, if enabled.
@@ -62,6 +67,9 @@
 # initiallty deployed.
 #
 # LEARNING_MODE = False
+
+# Log all attempts
+# LOG_ATTEMPTS = False
 
 # Allow messages when internal processing errors occur. Typically, this means
 # database errors, such as your database backend being offline.
