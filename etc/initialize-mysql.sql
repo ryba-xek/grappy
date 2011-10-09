@@ -37,3 +37,12 @@ CREATE TABLE whitelist (
 		comment TEXT,
 		PRIMARY KEY (ip)
 		) ENGINE=InnoDB;
+
+CREATE TABLE `log` (
+  `ts` int(11) NOT NULL,
+  `ip` char(15) NOT NULL DEFAULT '',
+  `sender` varchar(255) NOT NULL DEFAULT '',
+  `recipient` varchar(255) NOT NULL DEFAULT '',
+  `result` enum('REJECT','DEFER','DEFER_IF_REJECT','DEFER_IF_PERMIT','BCC','DISCARD','DUNNO','FILTER','HOLD','REDIRECT','WARN','') NOT NULL DEFAULT '',
+  KEY `ts` (`ts`)
+) ENGINE=InnoDB;

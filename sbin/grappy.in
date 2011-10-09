@@ -673,7 +673,8 @@ class GreylistRequestHandler (SocketServer.StreamRequestHandler):
 					printDebug ('Action: %s' % (action))
 
 				if LOG_ATTEMPTS:
-					self.info.logAttempt(action)
+					#Action can be: REJECT, DEFER, DEFER_IF_REJECT, DEFER_IF_PERMIT, BCC, DISCARD, DUNNO, FILTER, HOLD, REDIRECT, WARN
+					self.info.logAttempt(action.split(' ', 1)[0].upper())
 
 				if HEADERS == True and header != None:
 					printDebug ("Header: %s" % (header))
